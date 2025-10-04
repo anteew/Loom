@@ -1,3 +1,21 @@
+import { test, expect, vi } from 'vitest';
+
+vi.mock('@modelcontextprotocol/sdk/server/index.js', () => {
+  return {
+    Server: class {
+      constructor() { this._handlers = {}; }
+      setRequestHandler(spec, handler) {
+        const key = typeof spec === 'string' ? spec : spec?.method;
+        this._handlers[key] = handler;
+      }
+      async connect() {}
+    }
+  };
+});
+vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => {
+  return { StdioServerTransport: class {} };
+});
+
 import GraphManager from '../src/graph/GraphManager.js';
 import IngestionPipeline from '../src/ingestion/IngestionPipeline.js';
 import KnowledgeGraphMCPServer from '../src/mcp/KnowledgeGraphServer.js';
