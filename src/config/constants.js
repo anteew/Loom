@@ -1,0 +1,5 @@
+export const CONFIDENCE = {
+  AUTO_EXECUTE: 0.95,
+  HUMAN_REVIEW: 0.75,
+  REJECT: 0.75
+};
