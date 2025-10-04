@@ -1,0 +1,818 @@
+Technical Design Specifications
+
+# Knowledge Graph RAG System - Technical Design Specification
+
+## 1. Executive Summary
+
+This system provides an AI-driven knowledge graph that incrementally builds structured knowledge from unstructured text chunks over time, designed for RAG (Retrieval Augmented Generation) applications. The system emphasizes provenance, safety, and preventing degradation through evidence-based updates.
+
+**Language**: Node.js / JavaScript (ES modules)  
+**License Requirement**: All dependencies must be permissive (MIT, Apache 2.0, BSD)
+
+---
+
+## 2. System Architecture
+
+### 2.1 Repository Structure Recommendation
+
+**RECOMMENDED: Separate repositories with clean interfaces**
+
+```
+knowledge-graph-service/          (This repo - can be reused)
+├── src/
+│   ├── graph/                    # Graph operations
+│   ├── vector/                   # Vector similarity
+│   ├── maintenance/              # Graph cleanup
+│   └── mcp/                      # MCP server
+├── package.json
+└── README.md
+
+rag-application/                   (Your main RAG system)
+├── src/
+│   ├── ingestion/                # Document processing
+│   ├── retrieval/                # RAG retrieval logic
+│   └── clients/
+│       └── knowledge-graph-client.js  # Talks to KG service
+├── package.json
+└── README.md
+```
+
+**Why separate?**
+- Knowledge graph is reusable across projects
+- Clear API boundary via MCP
+- Can version/deploy independently
+- Easier to test in isolation
+- Different teams can own each repo
+
+**Interface**: MCP protocol (JSON-RPC over stdio/HTTP)
+
+---
+
+## 3. Technology Stack
+
+### 3.1 Core Dependencies
+
+```json
+{
+  "dependencies": {
+    "graphology": "^0.25.4",           // MIT - Graph structure
+    "graphology-operators": "^1.6.0",  // MIT - Graph operations
+    "@modelcontextprotocol/sdk": "latest", // MCP server framework
+    "chromadb": "^1.8.1",              // Apache 2.0 - Vector DB
+    "sqlite3": "^5.1.7",               // BSD - Persistence
+    "better-sqlite3": "^9.2.2",        // MIT - Sync SQLite (alternative)
+    "uuid": "^9.0.1"                   // MIT - ID generation
+  }
+}
+```
+
+### 3.2 Optional/Development Dependencies
+
+```json
+{
+  "devDependencies": {
+    "vitest": "^1.0.0",               // Testing
+    "@types/node": "^20.0.0",         // TypeScript types (optional)
+    "tsx": "^4.7.0"                   // TypeScript execution (optional)
+  }
+}
+```
+
+---
+
+## 4. Data Models
+
+### 4.1 Entity Model
+
+```javascript
+{
+  id: "uuid-v4",                      // Unique identifier
+  name: "Tim Cook",                   // Display name
+  type: "Person",                     // Entity type (Person, Company, Event, etc.)
+  aliases: ["Timothy Cook", "T. Cook"], // Alternative names
+  properties: {                       // Flexible key-value properties
+    birthYear: 1960,
+    role: "CEO"
+  },
+  embedding: Float32Array,            // Vector embedding for similarity
+  sources: [                          // CRITICAL: Provenance
+    {
+      chunkId: "doc_123_chunk_5",
+      text: "Tim Cook became CEO...",
+      timestamp: "2024-03-15T10:30:00Z",
+      confidence: 0.95
+    }
+  ],
+  metadata: {
+    createdAt: "2024-03-15T10:30:00Z",
+    updatedAt: "2024-03-15T10:30:00Z",
+    version: 1
+  }
+}
+```
+
+### 4.2 Relationship Model
+
+```javascript
+{
+  id: "uuid-v4",
+  from: "entity-id-1",                // Source entity
+  to: "entity-id-2",                  // Target entity
+  type: "CEO_OF",                     // Relationship type
+  properties: {                       // Relationship-specific properties
+    startDate: "2011-08-24",
+    endDate: null
+  },
+  sources: [                          // CRITICAL: Provenance
+    {
+      chunkId: "doc_123_chunk_5",
+      text: "became CEO of Apple in 2011",
+      timestamp: "2024-03-15T10:30:00Z",
+      confidence: 0.92
+    }
+  ],
+  metadata: {
+    createdAt: "2024-03-15T10:30:00Z",
+    updatedAt: "2024-03-15T10:30:00Z",
+    version: 1,
+    supersedes: null                  // ID of relationship this replaced
+  }
+}
+```
+
+### 4.3 Source Chunk Model
+
+```javascript
+{
+  id: "doc_123_chunk_5",
+  documentId: "doc_123",
+  text: "Full text of the chunk...",
+  chunkIndex: 5,
+  metadata: {
+    source: "annual_report_2023.pdf",
+    processedAt: "2024-03-15T10:30:00Z"
+  }
+}
+```
+
+---
+
+## 5. Core Components
+
+### 5.1 Graph Manager (MUST IMPLEMENT)
+
+**File**: `src/graph/GraphManager.js`
+
+```javascript
+class GraphManager {
+  constructor(persistencePath) {
+    this.graph = new Graph({ multi: true }); // Allow multiple edges
+    this.persistencePath = persistencePath;
+    this.load(); // Load from disk if exists
+  }
+
+  // MUST IMPLEMENT
+  addEntity(entity) { }
+  updateEntity(id, updates) { }
+  getEntity(id) { }
+  deleteEntity(id) { } // Soft delete - mark as deleted
+  
+  addRelationship(relationship) { }
+  updateRelationship(id, updates) { }
+  getRelationship(id) { }
+  
+  // Graph traversal
+  getNeighbors(entityId, depth = 1) { }
+  findPath(fromId, toId, maxDepth = 3) { }
+  
+  // Persistence
+  save() { } // Serialize to disk
+  load() { } // Load from disk
+  
+  // Statistics
+  getStats() { 
+    return {
+      nodeCount: this.graph.order,
+      edgeCount: this.graph.size,
+      entityTypes: this.getEntityTypeCounts(),
+      relationshipTypes: this.getRelationshipTypeCounts()
+    };
+  }
+}
+```
+
+### 5.2 Vector Similarity Manager (MUST IMPLEMENT)
+
+**File**: `src/vector/VectorManager.js`
+
+```javascript
+class VectorManager {
+  constructor(chromaClient) {
+    this.client = chromaClient;
+    this.collection = null;
+  }
+
+  async initialize() {
+    // Initialize ChromaDB collection
+    this.collection = await this.client.getOrCreateCollection({
+      name: "entity_embeddings"
+    });
+  }
+
+  // MUST IMPLEMENT
+  async addEmbedding(entityId, name, type, embedding) {
+    // Store embedding with metadata
+  }
+
+  async searchSimilar(name, type, topK = 5) {
+    // Returns: [{ id, similarity, name, type }, ...]
+  }
+
+  async updateEmbedding(entityId, embedding) { }
+  
+  async deleteEmbedding(entityId) { }
+}
+```
+
+### 5.3 Ingestion Pipeline (MUST IMPLEMENT)
+
+**File**: `src/ingestion/IngestionPipeline.js`
+
+```javascript
+class IngestionPipeline {
+  constructor(graphManager, vectorManager, llmClient) {
+    this.graphManager = graphManager;
+    this.vectorManager = vectorManager;
+    this.llmClient = llmClient;
+  }
+
+  // MUST IMPLEMENT
+  async processChunk(chunk) {
+    // 1. Extract entities and relationships using LLM
+    const extracted = await this.extractInformation(chunk);
+    
+    // 2. For each entity, check if exists
+    for (let entity of extracted.entities) {
+      const existing = await this.findExistingEntity(entity);
+      
+      if (existing) {
+        await this.updateExistingEntity(existing.id, entity, chunk);
+      } else {
+        await this.createNewEntity(entity, chunk);
+      }
+    }
+    
+    // 3. Add relationships
+    for (let rel of extracted.relationships) {
+      await this.addRelationshipWithProvenance(rel, chunk);
+    }
+    
+    return { entitiesProcessed: extracted.entities.length };
+  }
+
+  // MUST IMPLEMENT
+  async extractInformation(chunk) {
+    // Call LLM to extract structured data
+    // Returns: { entities: [...], relationships: [...] }
+  }
+
+  // MUST IMPLEMENT
+  async findExistingEntity(entity) {
+    // Use vector similarity to find matches
+    const similar = await this.vectorManager.searchSimilar(
+      entity.name, 
+      entity.type,
+      topK: 3
+    );
+    
+    if (similar.length > 0 && similar[0].similarity > 0.85) {
+      return this.graphManager.getEntity(similar[0].id);
+    }
+    return null;
+  }
+
+  async createNewEntity(entity, sourceChunk) { /* MUST IMPLEMENT */ }
+  async updateExistingEntity(id, newData, sourceChunk) { /* MUST IMPLEMENT */ }
+  async addRelationshipWithProvenance(rel, sourceChunk) { /* MUST IMPLEMENT */ }
+}
+```
+
+### 5.4 Graph Maintenance Service (CAN BE STUB)
+
+**File**: `src/maintenance/MaintenanceService.js`
+
+```javascript
+class MaintenanceService {
+  constructor(graphManager, vectorManager, llmClient) {
+    this.graphManager = graphManager;
+    this.vectorManager = vectorManager;
+    this.llmClient = llmClient;
+    this.config = {
+      autoExecuteThreshold: 0.95,
+      humanReviewThreshold: 0.75
+    };
+  }
+
+  // CAN BE STUB - Implement later
+  async runMaintenance() {
+    const issues = await this.detectIssues();
+    const suggestions = await this.generateSuggestions(issues);
+    const actions = await this.categorizeSuggestions(suggestions);
+    
+    return {
+      autoExecuted: actions.autoExecute,
+      queuedForReview: actions.needsReview,
+      rejected: actions.rejected
+    };
+  }
+
+  // CAN BE STUB
+  async detectIssues() {
+    return {
+      duplicateCandidates: await this.findDuplicateCandidates(),
+      orphanedNodes: await this.findOrphanedNodes(),
+      inconsistentRelations: await this.findInconsistentRelations(),
+      contradictions: await this.findContradictions()
+    };
+  }
+
+  // Helper methods can be stubs
+  async findDuplicateCandidates() { return []; }
+  async findOrphanedNodes() { return []; }
+  async findInconsistentRelations() { return []; }
+  async findContradictions() { return []; }
+  async generateSuggestions(issues) { return []; }
+  async categorizeSuggestions(suggestions) { 
+    return { autoExecute: [], needsReview: [], rejected: [] };
+  }
+}
+```
+
+### 5.5 MCP Server (MUST IMPLEMENT)
+
+**File**: `src/mcp/KnowledgeGraphServer.js`
+
+```javascript
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
+class KnowledgeGraphMCPServer {
+  constructor(graphManager, vectorManager, ingestionPipeline) {
+    this.graphManager = graphManager;
+    this.vectorManager = vectorManager;
+    this.ingestionPipeline = ingestionPipeline;
+    this.server = new Server({
+      name: "knowledge-graph",
+      version: "1.0.0"
+    }, {
+      capabilities: {
+        tools: {}
+      }
+    });
+    
+    this.setupTools();
+  }
+
+  // MUST IMPLEMENT
+  setupTools() {
+    // Tool: Process a new chunk
+    this.server.setRequestHandler("tools/call", async (request) => {
+      const { name, arguments: args } = request.params;
+      
+      switch(name) {
+        case "process_chunk":
+          return await this.ingestionPipeline.processChunk(args.chunk);
+          
+        case "search_entities":
+          return await this.vectorManager.searchSimilar(
+            args.name, 
+            args.type, 
+            args.topK || 5
+          );
+          
+        case "get_entity":
+          return this.graphManager.getEntity(args.id);
+          
+        case "get_neighbors":
+          return this.graphManager.getNeighbors(args.id, args.depth || 1);
+          
+        case "add_entity":
+          return this.graphManager.addEntity(args.entity);
+          
+        case "add_relationship":
+          return this.graphManager.addRelationship(args.relationship);
+          
+        case "get_graph_stats":
+          return this.graphManager.getStats();
+          
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    });
+  }
+
+  // MUST IMPLEMENT
+  async start() {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error("Knowledge Graph MCP Server running on stdio");
+  }
+}
+```
+
+---
+
+## 6. Safety & Grounding Mechanisms
+
+### 6.1 Provenance Tracking (MUST IMPLEMENT)
+
+Every entity and relationship MUST include:
+- Source chunk ID
+- Original text snippet
+- Timestamp
+- Confidence score
+
+**Implementation**: Enforced in `IngestionPipeline` - no entity/relationship can be created without source.
+
+### 6.2 Confidence Thresholds (MUST IMPLEMENT)
+
+```javascript
+const CONFIDENCE_CONFIG = {
+  AUTO_EXECUTE: 0.95,      // Auto-apply changes
+  HUMAN_REVIEW: 0.75,      // Queue for review
+  REJECT: 0.75             // Below this, reject
+};
+```
+
+### 6.3 Audit Trail (MUST IMPLEMENT)
+
+All changes must be versioned:
+- Never delete, only supersede
+- Track what changed, when, and why
+- Enable rollback to any point
+
+**Storage**: SQLite table for change log
+
+```sql
+CREATE TABLE change_log (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT,
+  relationship_id TEXT,
+  operation TEXT,  -- 'create', 'update', 'merge', 'delete'
+  before_state TEXT,  -- JSON
+  after_state TEXT,   -- JSON
+  reason TEXT,
+  confidence REAL,
+  timestamp TEXT,
+  supersedes TEXT
+);
+```
+
+### 6.4 Validation Rules (CAN BE STUB)
+
+Hard constraints - can be implemented incrementally:
+- Date logic validation
+- Required field validation
+- Relationship integrity (both endpoints exist)
+
+---
+
+## 7. Persistence Strategy
+
+### 7.1 Graph Storage
+
+**Primary**: Graphology in-memory graph  
+**Persistence**: Serialize to JSON, store in SQLite blob or file
+
+```javascript
+// Save
+const graphData = this.graph.export();
+fs.writeFileSync(`${this.persistencePath}/graph.json`, JSON.stringify(graphData));
+
+// Load
+const graphData = JSON.parse(fs.readFileSync(`${this.persistencePath}/graph.json`));
+this.graph.import(graphData);
+```
+
+### 7.2 Vector Storage
+
+**Primary**: ChromaDB (handles persistence automatically)  
+**Location**: Configurable directory
+
+### 7.3 Source Chunks
+
+**Storage**: SQLite table
+
+```sql
+CREATE TABLE source_chunks (
+  id TEXT PRIMARY KEY,
+  document_id TEXT,
+  text TEXT,
+  chunk_index INTEGER,
+  metadata TEXT,  -- JSON
+  processed_at TEXT
+);
+```
+
+---
+
+## 8. API Specification (MCP Tools)
+
+### 8.1 Ingestion Tools
+
+#### `process_chunk`
+```json
+{
+  "name": "process_chunk",
+  "description": "Process a new text chunk and update the knowledge graph",
+  "parameters": {
+    "chunk": {
+      "type": "object",
+      "properties": {
+        "id": "string",
+        "text": "string",
+        "documentId": "string",
+        "metadata": "object"
+      }
+    }
+  }
+}
+```
+
+### 8.2 Query Tools
+
+#### `search_entities`
+```json
+{
+  "name": "search_entities",
+  "description": "Find entities similar to a given name",
+  "parameters": {
+    "name": "string",
+    "type": "string (optional)",
+    "topK": "number (optional, default: 5)"
+  }
+}
+```
+
+#### `get_entity`
+```json
+{
+  "name": "get_entity",
+  "parameters": {
+    "id": "string"
+  }
+}
+```
+
+#### `get_neighbors`
+```json
+{
+  "name": "get_neighbors",
+  "parameters": {
+    "id": "string",
+    "depth": "number (optional, default: 1)",
+    "relationshipTypes": "array<string> (optional filter)"
+  }
+}
+```
+
+### 8.3 Modification Tools
+
+#### `add_entity`
+#### `add_relationship`
+#### `update_entity`
+
+### 8.4 Maintenance Tools (CAN BE STUB)
+
+#### `run_maintenance`
+#### `get_maintenance_report`
+
+---
+
+## 9. Implementation Phases
+
+### Phase 1: Core Infrastructure (Week 1-2)
+**MUST IMPLEMENT**
+- ✅ GraphManager basic operations
+- ✅ VectorManager with ChromaDB
+- ✅ Basic MCP server with essential tools
+- ✅ Persistence layer (save/load)
+- ✅ Source chunk storage
+
+### Phase 2: Ingestion Pipeline (Week 3-4)
+**MUST IMPLEMENT**
+- ✅ IngestionPipeline with LLM integration
+- ✅ Entity extraction and deduplication
+- ✅ Relationship creation with provenance
+- ✅ Confidence scoring
+
+### Phase 3: Safety & Grounding (Week 5-6)
+**MUST IMPLEMENT**
+- ✅ Provenance enforcement
+- ✅ Audit trail/change log
+- ✅ Confidence thresholds
+- ✅ Rollback capability
+
+### Phase 4: Graph Maintenance (Week 7-8)
+**CAN BE STUB INITIALLY**
+- ⚠️ Duplicate detection
+- ⚠️ Contradiction detection
+- ⚠️ LLM-based cleanup suggestions
+- ⚠️ Human review queue
+
+### Phase 5: Optimization (Week 9+)
+**FUTURE**
+- Graph query optimization
+- Embedding model fine-tuning
+- Batch processing
+- Monitoring & metrics
+
+---
+
+## 10. Testing Strategy
+
+### 10.1 Unit Tests (MUST IMPLEMENT)
+- GraphManager operations
+- VectorManager similarity search
+- Entity deduplication logic
+
+### 10.2 Integration Tests (MUST IMPLEMENT)
+- Full ingestion pipeline
+- MCP tool calls end-to-end
+- Persistence and recovery
+
+### 10.3 Safety Tests (MUST IMPLEMENT)
+- Verify provenance is always captured
+- Test confidence thresholds
+- Verify audit trail completeness
+
+---
+
+## 11. Configuration
+
+**File**: `config.js`
+
+```javascript
+export default {
+  persistence: {
+    graphPath: './data/graph.json',
+    chromaPath: './data/chroma',
+    sqlitePath: './data/kg.db'
+  },
+  
+  safety: {
+    minConfidenceAuto: 0.95,
+    minConfidenceReview: 0.75,
+    requireProvenance: true,
+    enableAuditLog: true
+  },
+  
+  vector: {
+    similarityThreshold: 0.85,
+    topKResults: 5
+  },
+  
+  llm: {
+    // LLM configuration will come from RAG system
+    // MCP client handles this
+  }
+};
+```
+
+---
+
+## 12. Monitoring & Observability
+
+### 12.1 Metrics to Track
+
+```javascript
+{
+  graphMetrics: {
+    totalEntities: number,
+    totalRelationships: number,
+    entitiesByType: {},
+    relationshipsByType: {},
+    averageRelationshipsPerEntity: number
+  },
+  
+  ingestionMetrics: {
+    chunksProcessed: number,
+    entitiesCreated: number,
+    entitiesUpdated: number,
+    relationshipsCreated: number,
+    averageConfidence: number
+  },
+  
+  safetyMetrics: {
+    lowConfidenceRejections: number,
+    humanReviewQueueSize: number,
+    auditLogSize: number
+  }
+}
+```
+
+### 12.2 Health Checks
+
+- Graph is loadable
+- Vector DB is accessible
+- SQLite is writable
+- No corruption detected
+
+---
+
+## 13. Deployment
+
+### 13.1 As MCP Server
+
+```bash
+# In MCP client config
+{
+  "mcpServers": {
+    "knowledge-graph": {
+      "command": "node",
+      "args": ["./src/mcp/server.js"],
+      "env": {
+        "KG_DATA_PATH": "./data"
+      }
+    }
+  }
+}
+```
+
+### 13.2 Development Mode
+
+```bash
+npm run dev  # Starts MCP server with hot reload
+npm test     # Run test suite
+npm run maintenance  # Run graph cleanup job
+```
+
+---
+
+## 14. Future Enhancements
+
+- **Multi-language support**: Embeddings for non-English text
+- **Temporal graphs**: Track how relationships change over time
+- **Graph visualization**: Web UI for exploring the graph
+- **Advanced inference**: Use graph neural networks for link prediction
+- **Federated graphs**: Merge graphs from multiple sources
+- **Real-time updates**: WebSocket support for live graph changes
+
+---
+
+## 15. Success Criteria
+
+### Phase 1 Success
+- ✅ Can process chunks and create entities
+- ✅ Can search for similar entities
+- ✅ Can retrieve entity neighborhoods
+- ✅ Graph persists between restarts
+
+### Phase 2 Success
+- ✅ Correctly deduplicates entities (>90% accuracy on test set)
+- ✅ Relationships have provenance
+- ✅ Confidence scores are meaningful
+
+### Phase 3 Success
+- ✅ Zero entities without source provenance
+- ✅ Can rollback to any previous state
+- ✅ Audit log is complete and queryable
+
+---
+
+## 16. Dependencies & Licenses
+
+All dependencies verified as permissive licenses:
+
+- **Graphology**: MIT ✅
+- **ChromaDB**: Apache 2.0 ✅  
+- **SQLite3**: BSD ✅
+- **UUID**: MIT ✅
+- **MCP SDK**: MIT ✅
+
+**No GPL dependencies** ✅
+
+---
+
+## Appendix A: Example Usage
+
+```javascript
+// From RAG application
+const kgClient = new KnowledgeGraphClient('stdio://knowledge-graph');
+
+// Process document chunks
+for (let chunk of documentChunks) {
+  await kgClient.processChunk({
+    id: `doc_${docId}_chunk_${i}`,
+    text: chunk.text,
+    documentId: docId,
+    metadata: { page: chunk.page }
+  });
+}
+
+// Retrieve context for RAG
+const context = await kgClient.getNeighbors(entityId, depth: 2);
+
+// Search for entities
+const results = await kgClient.searchEntities("Apple", type: "Company");
+```
