@@ -71,10 +71,17 @@ export const CONFIDENCE = {
 
 ## Tests
 
-Minimal smoke test with Vitest:
+Run all tests:
 ```
 npm test
 ```
+
+Run with coverage and thresholds (fails under thresholds):
+```
+npm run test:cov
+```
+
+CI runs on Node 18.x and 20.x. Coverage is generated and uploaded on Node 20.x only to avoid duplicate uploads.
 
 ## Linting
 
@@ -87,7 +94,6 @@ npm run lint:fix
 ## Contributing
 
 See CONTRIBUTING.md for development standards, linting/testing workflow, and commit/PR guidelines.
-
 
 ## Next Steps (TODOs)
 
