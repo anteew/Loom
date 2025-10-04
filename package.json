@@ -1,0 +1,31 @@
+{
+  "name": "loom-knowledge-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Knowledge Graph RAG service (MCP server + graph/vector/ingestion stubs)",
+  "scripts": {
+    "dev": "node --watch ./src/mcp/index.js",
+    "start:mcp": "node ./src/mcp/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "node -e \"console.log('No linter configured yet')\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "better-sqlite3": "^9.2.2",
+    "chromadb": "^1.8.1",
+    "graphology": "^0.25.4",
+    "graphology-operators": "^1.6.0",
+    "sqlite3": "^5.1.7",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
