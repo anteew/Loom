@@ -83,6 +83,18 @@ npm run test:cov
 
 CI runs on Node 18.x and 20.x. Coverage is generated and uploaded on Node 20.x only to avoid duplicate uploads.
 
+## Linting
+
+ESLint is configured for Node.js ESM and Vitest. To run:
+```
+npm run lint
+npm run lint:fix
+```
+
+## Contributing
+
+See CONTRIBUTING.md for development standards, linting/testing workflow, and commit/PR guidelines.
+
 ## Next Steps (TODOs)
 
 - Integrate real LLM provider into llmClient for extractEntitiesAndRelations.
