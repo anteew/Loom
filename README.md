@@ -56,7 +56,7 @@ Knowledge Graph MCP Server running on stdio
 - VectorManager: Chroma collection initialization, add/update/delete embedding, simple name-based similarity stub.
 - IngestionPipeline: provenance-enforced entity/relationship creation, confidence gating via shared constants, abstract LLM client for extraction.
 - MaintenanceService: stubs per spec, ready to extend.
-- MCP server: tools routed per spec (process_chunk, search_entities, get_entity, get_neighbors, add_entity, add_relationship, get_graph_stats).
+- MCP server: tools routed per spec (process_chunk, search_entities, get_entity, get_neighbors, add_entity, update_entity, add_relationship, get_graph_stats, run_maintenance, get_maintenance_report).
 
 ## Confidence & Safety Configuration
 
