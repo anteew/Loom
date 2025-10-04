@@ -76,6 +76,19 @@ Minimal smoke test with Vitest:
 npm test
 ```
 
+## Linting
+
+ESLint is configured for Node.js ESM and Vitest. To run:
+```
+npm run lint
+npm run lint:fix
+```
+
+## Contributing
+
+See CONTRIBUTING.md for development standards, linting/testing workflow, and commit/PR guidelines.
+
+
 ## Next Steps (TODOs)
 
 - Integrate real LLM provider into llmClient for extractEntitiesAndRelations.

@@ -10,7 +10,8 @@
     "start:mcp": "node ./src/mcp/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "node -e \"console.log('No linter configured yet')\""
+    "lint": "eslint \"src/**/*.js\" \"tests/**/*.js\"",
+    "lint:fix": "eslint --fix \"src/**/*.js\" \"tests/**/*.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "latest",
@@ -23,6 +24,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-n": "^17.23.1",
+    "eslint-plugin-vitest": "^0.5.4",
     "vitest": "^1.0.0"
   },
   "engines": {
