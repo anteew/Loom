@@ -2,6 +2,7 @@ import GraphManager from '../graph/GraphManager.js';
 import VectorManager from '../vector/VectorManager.js';
 import IngestionPipeline from '../ingestion/IngestionPipeline.js';
 import KnowledgeGraphMCPServer from './KnowledgeGraphServer.js';
+import MaintenanceService from '../maintenance/MaintenanceService.js';
 import { ChromaClient } from 'chromadb';
 
 const llmClient = {
@@ -17,7 +18,14 @@ async function main() {
   await vectorManager.initialize();
 
   const ingestion = new IngestionPipeline(graphManager, vectorManager, llmClient);
-  const mcp = new KnowledgeGraphMCPServer(graphManager, vectorManager, ingestion);
+  const maintenance = new MaintenanceService(graphManager, vectorManager, llmClient);
+
+  const mcp = new KnowledgeGraphMCPServer(
+    graphManager,
+    vectorManager,
+    ingestion,
+    maintenance
+  );
   await mcp.start();
 }
 

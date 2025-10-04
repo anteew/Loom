@@ -2,10 +2,12 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 export class KnowledgeGraphMCPServer {
-  constructor(graphManager, vectorManager, ingestionPipeline) {
+  constructor(graphManager, vectorManager, ingestionPipeline, maintenanceService) {
     this.graphManager = graphManager;
     this.vectorManager = vectorManager;
     this.ingestionPipeline = ingestionPipeline;
+    this.maintenanceService = maintenanceService;
+    this._lastMaintenanceReport = null;
     this.server = new Server(
       { name: 'knowledge-graph', version: '1.0.0' },
       { capabilities: { tools: {} } }
@@ -36,11 +38,26 @@ export class KnowledgeGraphMCPServer {
         case 'add_entity':
           return this.graphManager.addEntity(args.entity);
 
+        case 'update_entity':
+          return this.graphManager.updateEntity(args.id, args.updates);
+
         case 'add_relationship':
           return this.graphManager.addRelationship(args.relationship);
 
         case 'get_graph_stats':
           return this.graphManager.getStats();
+
+        case 'run_maintenance': {
+          const report = await this.maintenanceService.runMaintenance();
+          this._lastMaintenanceReport = {
+            report,
+            generatedAt: new Date().toISOString()
+          };
+          return this._lastMaintenanceReport;
+        }
+
+        case 'get_maintenance_report':
+          return this._lastMaintenanceReport ?? { report: null, generatedAt: null };
 
         default:
           throw new Error(`Unknown tool: ${name}`);
