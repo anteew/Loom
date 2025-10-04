@@ -16,7 +16,7 @@ export class KnowledgeGraphMCPServer {
   }
 
   setupTools() {
-    this.server.setRequestHandler('tools/call', async (request) => {
+    const handler = async (request) => {
       const { name, arguments: args } = request.params ?? {};
       switch (name) {
         case 'process_chunk':
@@ -62,7 +62,9 @@ export class KnowledgeGraphMCPServer {
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
-    });
+    };
+    this._toolsCallHandler = handler;
+    this.server.setRequestHandler({ method: 'tools/call' }, handler);
   }
 
   async start() {

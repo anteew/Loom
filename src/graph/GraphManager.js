@@ -29,7 +29,7 @@ export class GraphManager {
     if (!this.graph.hasNode(id)) {
       this.graph.addNode(id, value);
     } else {
-      this.graph.setNodeAttributes(id, value);
+      this.graph.mergeNodeAttributes(id, value);
     }
     return value;
   }
@@ -48,7 +48,7 @@ export class GraphManager {
         version: (prev.metadata?.version ?? 1) + 1
       }
     };
-    this.graph.setNodeAttributes(id, next);
+    this.graph.mergeNodeAttributes(id, next);
     return next;
   }
 
@@ -61,7 +61,7 @@ export class GraphManager {
     if (!this.graph.hasNode(id)) throw new Error(`Entity not found: ${id}`);
     const prev = this.graph.getNodeAttributes(id);
     const next = { ...prev, deleted: true, metadata: { ...prev.metadata, updatedAt: new Date().toISOString() } };
-    this.graph.setNodeAttributes(id, next);
+    this.graph.mergeNodeAttributes(id, next);
     return next;
   }
 
@@ -85,7 +85,7 @@ export class GraphManager {
     if (!this.graph.hasEdge(id)) {
       this.graph.addEdgeWithKey(id, from, to, value);
     } else {
-      this.graph.setEdgeAttributes(id, value);
+      this.graph.mergeEdgeAttributes(id, value);
     }
     return value;
   }
@@ -104,7 +104,7 @@ export class GraphManager {
         version: (prev.metadata?.version ?? 1) + 1
       }
     };
-    this.graph.setEdgeAttributes(id, next);
+    this.graph.mergeEdgeAttributes(id, next);
     return next;
   }
 
